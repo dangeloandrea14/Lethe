@@ -1,0 +1,20 @@
+# Tested with Python 3.12. Install torch first, matching your CUDA version.
+torch==2.13.0
+torch_geometric==2.8.0
+numpy==2.4.6
+scipy==1.17.1
+scikit-learn==1.9.0
+pandas==2.3.3
+PyYAML==6.0.3
+networkx==3.6.1
+tqdm==4.68.4
+psutil==7.2.2
+
+jsonc-parser==1.1.5
+picologging==0.9.3
+jsonpickle==4.1.2
+
+matplotlib==3.11.0
+
+# only needed for ogbn-arxiv
+# ogb

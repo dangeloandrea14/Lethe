@@ -1,0 +1,248 @@
+from lethe.core.measure import GraphMeasure
+from lethe.evaluations.manager import Evaluation
+import torch
+import random
+import networkx as nx
+from tqdm import tqdm
+from torch_geometric.utils import to_networkx
+from sklearn import metrics
+import numpy as np
+from lethe.evaluations.LinkTeller.utils import construct_edge_sets, construct_edge_sets_from_random_subgraph, construct_balanced_edge_sets
+from lethe.evaluations.adversary import build_adversary_graph, tagged
+
+
+class LinkTeller(GraphMeasure):
+
+    def init(self):
+        super().init()
+        self.influence = self.params["influence"]
+        self.approx = self.params["approx"]
+        self.edge_sampler = self.params["edge_sampler"]
+        self.target = self.params["target"]
+        self.forget_part = self.params["forget_part"]
+        self.retain_part = self.params["retain_part"]
+        self.removal_type = self.global_ctx.removal_type
+        self.k_hat = self.params["k_hat"]
+        self.max_edges = self.params["max_edges"]
+        self.graph_knowledge = self.params["graph_knowledge"]
+        self.knowledge_fraction = self.params["knowledge_fraction"]
+        self.knowledge_seed = self.params["knowledge_seed"]
+        self.tag = self.params["tag"]
+
+
+    def check_configuration(self):
+        self.params["influence"] = self.params.get("influence", 0.0001)
+        self.params["approx"] = self.params.get("approx", True)
+        self.params["edge_sampler"] = self.params.get("edge_sampler", "balanced")
+        self.params["target"] = self.params.get("target","unlearned")
+        self.params["forget_part"] = self.params.get("forget_part","forget")
+        self.params["retain_part"] = self.params.get("retain_part","retain")
+        self.params["k_hat"] = self.params.get("k_hat", None)
+        self.params["max_edges"] = self.params.get("max_edges", 500)
+        self.params["graph_knowledge"] = self.params.get("graph_knowledge", "retain")
+        self.params["knowledge_fraction"] = self.params.get("knowledge_fraction", 1.0)
+        self.params["knowledge_seed"] = self.params.get("knowledge_seed", 42)
+        self.params["tag"] = self.params.get("tag", "")
+
+
+
+    def process(self, e: Evaluation):
+
+        try: 
+            self.max_hops = e.unlearner.hops
+        except:
+            self.max_hops = len(e.predictor.model.hidden_channels) + 1
+
+        unlearned_graph, labels, remapped_partitions = self.get_unlearned_graph(e.predictor, self.removal_type)
+        
+        og_graph = e.predictor.dataset.partitions['all'][0][0]
+
+        adv_graph = build_adversary_graph(unlearned_graph, og_graph,
+                                          knowledge=self.graph_knowledge,
+                                          fraction=self.knowledge_fraction,
+                                          seed=self.knowledge_seed)
+
+        self.features = adv_graph.x
+        self.edge_index = adv_graph.edge_index
+        self.n_features = len(adv_graph.x[0])
+
+        self.forget = e.unlearner.dataset.partitions[self.forget_part]
+        self.retain = e.unlearner.dataset.partitions[self.retain_part]
+
+        self.model = e.unlearned_model if 'unlearn' in self.target else e.predictor
+
+        self.model.model = self.model.model.to(self.model.device)
+        self.model.model.eval()
+        self.features = self.features.to(self.model.device)
+        self.edge_index = self.edge_index.to(self.model.device)
+
+        sampler = self.get_edge_sampler(self.edge_sampler)
+
+        self.forget_edges, self.nonexist_edges = sampler(og_graph, self.forget, max_hops = self.max_hops)
+
+        if self.max_edges is not None and len(self.forget_edges) > self.max_edges:
+            self.forget_edges = random.sample(self.forget_edges, self.max_edges)
+            self.nonexist_edges = self.nonexist_edges[:self.max_edges]
+            self.info(f'LinkTeller: capped to {self.max_edges} edges for evaluation')
+
+        norm_exist = []
+        norm_nonexist = []
+
+        # cache of the unperturbed forward pass
+        self._out_base = None
+
+        with torch.no_grad():
+            for u, v in self.forget_edges:
+
+                grad = self.get_gradient_eps(u, v) if self.approx else self.get_gradient(u, v)
+                norm_exist.append(grad.norm().item())
+
+
+            i = 0
+            for u, v in self.nonexist_edges:
+
+                i += 1 
+
+                grad = self.get_gradient_eps(u, v) if self.approx else self.get_gradient(u, v)
+                norm_nonexist.append(grad.norm().item())
+
+
+        y = [1] * len(norm_exist) + [0] * len(norm_nonexist)
+        pred = norm_exist + norm_nonexist
+
+        if self.k_hat is not None:
+            n = len(set([u for u,_ in self.forget_edges] + [v for _,v in self.forget_edges]))
+            m = int(self.k_hat * n * (n - 1) / 2)
+            scores = np.array(pred)
+            order = np.argsort(-scores)
+            y_hat = np.zeros_like(scores, dtype=int)
+            y_hat[order[:m]] = 1
+            prec = metrics.precision_score(y, y_hat, zero_division=0)
+            rec  = metrics.recall_score(y, y_hat, zero_division=0)
+
+            self.info(f'LinkTeller k_hat precision={prec:.4f} recall={rec:.4f}')
+
+        fpr, tpr, thresholds = metrics.roc_curve(y, pred)
+        auc = metrics.auc(fpr, tpr)
+
+
+        key = tagged(f'LinkTeller {self.target} auc with sampler {self.edge_sampler}:', self.tag)
+        self.info(f'{key} {auc}')
+        e.add_value(key, auc)
+
+
+        return e
+
+
+    
+    def get_gradient(self, u, v):
+        h = 1e-4
+        base = self.features
+        pert_plus = torch.zeros_like(base); pert_plus[v] = base[v] * h
+        pert_minus = torch.zeros_like(base); pert_minus[v] = -base[v] * h
+
+        with torch.no_grad():
+            out_plus  = self.model.model(base + pert_plus,  self.edge_index).detach()
+            out_minus = self.model.model(base + pert_minus, self.edge_index).detach()
+
+        grad_u = (out_plus[u] - out_minus[u]) / (2 * h)  
+        return grad_u
+
+
+    
+
+    def get_gradient_eps_mat(self, v):
+        pert_1 = torch.zeros_like(self.features)
+
+        pert_1[v] = self.features[v] * self.influence
+
+        grad = (self.model.model(self.features + pert_1, self.edge_index).detach() - 
+                self.model.model(self.features, self.edge_index).detach()) / self.influence
+
+        return grad
+    
+    def get_gradient_eps(self, u, v):
+        pert = torch.zeros_like(self.features)
+        pert[v] = self.features[v] * self.influence
+        with torch.no_grad():
+            out_plus  = self.model.model(self.features + pert, self.edge_index).detach()
+            if getattr(self, '_out_base', None) is None:
+                self._out_base = self.model.model(self.features, self.edge_index).detach()
+        return (out_plus[u] - self._out_base[u]) / self.influence
+        
+
+    def get_edge_sampler(self,name):
+        func_map = {
+            'balanced': self.get_edges,
+            'bfs+': self.construct_edge_sets_through_bfs_plus
+        }
+        return func_map.get(name)
+    
+    
+    def get_edges(self, graph, forget_set, max_hops=0):
+
+        seen = set()
+        forget_edges = []
+        for e in forget_set:
+            canonical = tuple(sorted(e))
+            if canonical not in seen:
+                seen.add(canonical)
+                forget_edges.append(canonical)
+
+        existing_edges = set(map(tuple, map(sorted, graph.edge_index.t().tolist())))
+
+        n = graph.num_nodes
+        non_edges = []
+        while len(non_edges) < len(forget_edges):
+            u = random.randint(0, n - 1)
+            v = random.randint(0, n - 1)
+            if u == v:
+                continue
+            edge = (min(u, v), max(u, v))
+            if edge not in existing_edges:
+                non_edges.append(edge)
+                existing_edges.add(edge)  # avoid duplicates
+
+        return forget_edges, non_edges
+
+
+    def construct_edge_sets_through_bfs_plus(self, graph, forget_set, max_hops=3, min_shared_neighbors=2, max_degree_diff=2):
+
+        G = to_networkx(graph, to_undirected=True)
+        
+
+        # collect actual existing edges in the subset, deduplicated
+        seen = set()
+        forget_edges = []
+        for e in forget_set:
+            canonical = tuple(sorted(e))
+            if canonical not in seen:
+                seen.add(canonical)
+                forget_edges.append(canonical)
+        forget_edge_set = seen
+
+        subset_nodes = {n for e in forget_edges for n in e}
+
+        negative_candidates = set()
+        for u in subset_nodes:
+            neighbors = nx.single_source_shortest_path_length(G, u, cutoff=max_hops)
+            for v in neighbors.keys():
+                if u == v: 
+                    continue
+                if v not in subset_nodes:
+                    continue
+                edge = tuple(sorted((u, v)))
+                if edge in forget_edge_set or G.has_edge(*edge):
+                    continue
+                degree_diff = abs(G.degree[u] - G.degree[v])
+                shared_nbrs = set(G.neighbors(u)).intersection(G.neighbors(v))
+                if degree_diff <= max_degree_diff and len(shared_nbrs) >= min_shared_neighbors:
+                    negative_candidates.add(edge)
+
+        negative_candidates = list(negative_candidates)
+        rng = random.Random(42)
+        non_existent_edges = rng.sample(
+            negative_candidates, min(len(forget_edges), len(negative_candidates))
+        )
+
+        return forget_edges, non_existent_edges

@@ -1,0 +1,4 @@
+{
+    "class": "lethe.unlearners.composite.Identity",
+    "parameters": {}
+}

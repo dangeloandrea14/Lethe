@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+.idea/
+.vscode/*
+.DS_Store
+._*
+
+# Generated data and run artefacts
+resources/data/*
+resources/cached/*
+output/*
+saliency_maps/*
+train_loader/*
+data/*
+
+# Paper sources
+latex/
+latex_apx/
+rebuttal/
+*.tex
+*.pdf
+
+# Local scratch configs
+configs/example_hf.jsonc
+configs/example_uci.jsonc
+
+# Local infrastructure
+launchers/
+visualization_scripts/
+
+# Shell scripts, except the documented entry point
+*.sh
+!test_launch.sh
+
+# Kept out of the public repo
+croissant.json

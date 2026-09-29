@@ -1,0 +1,27 @@
+name: lethe
+
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+
+dependencies:
+  - python=3.12
+  - pytorch>=2.0
+  - pytorch-cuda=12.4     # remove for CPU-only
+  - pip
+  - pip:
+      - torch_geometric>=2.3
+      - numpy
+      - scipy
+      - scikit-learn
+      - pandas
+      - networkx
+      - tqdm
+      - psutil
+      - PyYAML
+      - jsonc-parser
+      - picologging
+      - jsonpickle
+      - matplotlib
+      - jupyter

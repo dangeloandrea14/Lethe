@@ -1,0 +1,27 @@
+from copy import deepcopy
+
+from lethe.core.unlearner import Unlearner
+
+
+class Evaluation():
+    def __init__(self,unlearner: Unlearner, predictor):
+        self.data_info = {}
+        self._unlearned_model = None
+        self.unlearner = unlearner
+        self.predictor = deepcopy(predictor)
+        #self.forget_set = unlearner.dataset.partitions[default_forget]
+        self.data_info['unlearner'] = unlearner.__class__.__name__
+        self.data_info['dataset'] = unlearner.dataset.name
+        self.data_info['parameters'] = unlearner.params
+        self._cache = {}
+
+    def add_value(self, key, value):
+        self.data_info[key] = value
+
+    @property
+    def unlearned_model(self):
+        return self._unlearned_model 
+
+    @unlearned_model.setter
+    def unlearned_model(self, value):
+        self._unlearned_model = deepcopy(value)

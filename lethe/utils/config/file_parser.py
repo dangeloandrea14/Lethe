@@ -1,0 +1,17 @@
+import json
+from jsonc_parser.parser import JsoncParser
+
+from lethe.utils.config.composer import compose
+
+class Config:
+    def __init__(self,file):
+        self.__dict__ = file
+
+    @classmethod
+    def from_json(cls, json_file):
+        return cls(compose(JsoncParser.parse_file(json_file)))
+        
+    
+        
+    
+    

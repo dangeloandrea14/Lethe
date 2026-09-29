@@ -1,0 +1,23 @@
+{
+    "class": "lethe.evaluations.MIA.graph_umia.Attack",
+
+    "parameters": {
+      "attack_in_data": {
+        "class": "lethe.data.datasets.DatasetManager.DatasetManager",
+        "parameters": {
+          "DataSource": {
+            "class": "lethe.data.data_sources.TorchFileDataSource.TorchFileDataSource",
+            "parameters": {
+              "path": "resources/data/umia/umia.pt"
+            }
+          },
+          "partitions": [
+            { "class": "lethe.data.datasets.DataSplitter.DataSplitterPercentage",
+              "parameters": {"parts_names": ["train", "test"], "percentage": 0.5, "ref_data": "all"}
+            }
+          ],
+          "batch_size": 128
+        }
+      }
+    }
+  }
