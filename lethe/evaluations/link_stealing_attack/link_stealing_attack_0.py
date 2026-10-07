@@ -70,9 +70,10 @@ class LinkStealing0(GraphMeasure):
         self.features = self.features.to(self.model.device)
         self.edge_index = self.edge_index.to(self.model.device)
 
-        exist_edges, non_existent_edges = get_link_from_edge_index(graph.edge_index, graph.num_nodes)
+        rng = random.Random(1)
+        exist_edges, non_existent_edges = get_link_from_edge_index(graph.edge_index, graph.num_nodes, rng)
 
-        exist_edges, non_existent_edges = random.sample(exist_edges, k=round(len(exist_edges) * self.ratio)), random.sample(non_existent_edges, k=round(len(non_existent_edges) * self.ratio))
+        exist_edges, non_existent_edges = rng.sample(exist_edges, k=round(len(exist_edges) * self.ratio)), rng.sample(non_existent_edges, k=round(len(non_existent_edges) * self.ratio))
 
         with torch.no_grad():
             pred_train = self.model.model(self.features ,self.edge_index)
@@ -138,7 +139,7 @@ def get_link(adj, node_num):
             existing_set.add(edge_str)
     return link, unlink
 
-def get_link_from_edge_index(edge_index, node_num):
+def get_link_from_edge_index(edge_index, node_num, rng=None):
     rows = edge_index[0].tolist()
     cols = edge_index[1].tolist()
 
@@ -152,10 +153,10 @@ def get_link_from_edge_index(edge_index, node_num):
             existing_set.add(f"{c},{r}")
 
     unlink = []
-    random.seed(1)
+    rng = rng or random.Random(1)
     while len(unlink) < len(link):
-        u = random.randint(0, node_num - 1)
-        v = random.randint(0, node_num - 1)
+        u = rng.randint(0, node_num - 1)
+        v = rng.randint(0, node_num - 1)
         if u == v:
             continue
         if u > v:

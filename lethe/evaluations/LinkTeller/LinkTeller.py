@@ -76,12 +76,14 @@ class LinkTeller(GraphMeasure):
         self.features = self.features.to(self.model.device)
         self.edge_index = self.edge_index.to(self.model.device)
 
+        self._rng = random.Random(self.global_ctx.config.globals['seed'])
+
         sampler = self.get_edge_sampler(self.edge_sampler)
 
         self.forget_edges, self.nonexist_edges = sampler(og_graph, self.forget, max_hops = self.max_hops)
 
         if self.max_edges is not None and len(self.forget_edges) > self.max_edges:
-            self.forget_edges = random.sample(self.forget_edges, self.max_edges)
+            self.forget_edges = self._rng.sample(self.forget_edges, self.max_edges)
             self.nonexist_edges = self.nonexist_edges[:self.max_edges]
             self.info(f'LinkTeller: capped to {self.max_edges} edges for evaluation')
 
@@ -194,8 +196,8 @@ class LinkTeller(GraphMeasure):
         n = graph.num_nodes
         non_edges = []
         while len(non_edges) < len(forget_edges):
-            u = random.randint(0, n - 1)
-            v = random.randint(0, n - 1)
+            u = self._rng.randint(0, n - 1)
+            v = self._rng.randint(0, n - 1)
             if u == v:
                 continue
             edge = (min(u, v), max(u, v))

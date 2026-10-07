@@ -49,6 +49,7 @@ class Configurable(Base):
 class Saveable(Configurable):
 
     CACHE_DIR = 'resources/cached'
+    CONTEXT_KEYS = ('global_ctx', 'local', 'local_config', 'params', 'dataset')
     os.makedirs(CACHE_DIR, exist_ok=True)
     
     def check_configuration(self):
@@ -68,8 +69,10 @@ class Saveable(Configurable):
 
         if Path(file_name).exists(): #TODO: Disable Cache for unlearners
             try :
+                context = {k: self.__dict__[k] for k in Saveable.CONTEXT_KEYS if k in self.__dict__}
                 with open (file_name, "rb") as file_handle :
                     self.__dict__ = pickle.load (file_handle)
+                self.__dict__.update(context)
                 self.info(f'''{bcolors.FAIL}Loaded Instance from: {bcolors.UNDERLINE}{file_name}{bcolors.ENDC}''')
                 return True
             except EOFError as eof_error :
@@ -86,7 +89,7 @@ class Saveable(Configurable):
         self.info(f'''{bcolors.FAIL}Dumped Instance to: {bcolors.UNDERLINE}{file_name}{bcolors.ENDC}''')
 
         with open (file_name, "wb") as file_handle :
-            pickle.dump (self.__dict__, file_handle)
+            pickle.dump ({k: v for k, v in self.__dict__.items() if k not in Saveable.CONTEXT_KEYS}, file_handle)
 
     def __cfg_hashing(self, alias=None):
         dictionary  = __resolve_cfg_with_context__(self)

@@ -34,3 +34,5 @@ visualization_scripts/
 
 # Kept out of the public repo
 croissant.json
+
+poster/*
